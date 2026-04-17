@@ -1,0 +1,8 @@
+# AI Agent
+.deepagents
+
+# Python virtual environment
+.venv
+
+# Configuration
+.env
