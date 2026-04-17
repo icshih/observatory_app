@@ -1,11 +1,28 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { raDecToXY, xyToRADec } from "../lib/projection.js";
 import { formatRA, formatDec } from "../lib/format.js";
+import { getHorizonPoints, drawHorizon } from "../lib/horizon.js";
 
-const OBSERVER_LAT = 48.8; // degrees — Paris-ish default, TODO: make configurable
+const OBSERVER_LAT = import.meta.env.VITE_OBSERVER_LATITUDE
+  ? parseFloat(import.meta.env.VITE_OBSERVER_LATITUDE)
+  : 48.8;
 const MIN_SCALE = 80;
 const MAX_SCALE = 2000;
 const DEFAULT_SCALE = 280;
+
+const CONSTELLATION_LABELS = [
+  { name: "Orion",  ra:  5.58, dec:  2.0 },
+  { name: "UMa",    ra: 11.90, dec: 52.0 },
+  { name: "CMa",    ra:  6.95, dec: -21.0 },
+  { name: "Tau",    ra:  4.70, dec: 18.0 },
+  { name: "Sco",    ra: 16.90, dec: -33.0 },
+  { name: "Cru",    ra: 12.50, dec: -60.0 },
+  { name: "Cen",    ra: 13.50, dec: -47.0 },
+  { name: "Leo",    ra: 10.70, dec: 16.0 },
+  { name: "Per",    ra:  3.40, dec: 47.0 },
+  { name: "Aur",    ra:  5.60, dec: 41.0 },
+];
+
 
 function magToRadius(mag) {
   // Bright = big. mag -1.5 → 5px, mag 6 → 1px.
@@ -34,6 +51,11 @@ export default function CelestialChart({ status, stars, messier, constellationLi
       stateRef.current.centerRA = status.sidereal_time;
     }
   }, [status?.sidereal_time]);
+
+  // Log latitude for debugging
+  useEffect(() => {
+    console.debug("Observer latitude set to", OBSERVER_LAT, "degrees");
+  }, [OBSERVER_LAT]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -108,6 +130,19 @@ export default function CelestialChart({ status, stars, messier, constellationLi
       ctx.stroke();
     }
     ctx.restore();
+
+    // ── Constellation labels ──
+    if (scale > 150) {
+      ctx.save();
+      ctx.font = "9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = "rgba(100,140,200,0.65)";
+      for (const { name, ra, dec } of CONSTELLATION_LABELS) {
+        const [px, py] = toCanvas(ra, dec);
+        if (!isVisible(px, py)) continue;
+        ctx.fillText(name, px, py);
+      }
+      ctx.restore();
+    }
 
     // ── Stars ──
     ctx.save();
@@ -196,22 +231,8 @@ export default function CelestialChart({ status, stars, messier, constellationLi
 
     // ── Horizon indicator (altitude 0°) ──
     if (status?.connected) {
-      ctx.save();
-      ctx.strokeStyle = "rgba(239,68,68,0.25)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 8]);
-      ctx.beginPath();
-      let first = true;
-      // Approximate horizon: alt=0 projected onto chart via azimuth
-      // Simpler: draw the Dec = (90° - lat) circle in alt-az space...
-      // Instead, mark the celestial equator as a guide
-      for (let ra = 0; ra <= 24; ra += 0.25) {
-        const [px, py] = toCanvas(ra, 0);
-        if (first) { ctx.moveTo(px, py); first = false; }
-        else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-      ctx.restore();
+      const horizonPoints = getHorizonPoints(OBSERVER_LAT, stateRef.current.centerRA);
+      drawHorizon(ctx, horizonPoints, toCanvas);
     }
   }, [stars, messier, constellationLines, status]);
 
