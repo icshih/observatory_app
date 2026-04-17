@@ -37,7 +37,8 @@ npm run build          # output: frontend/dist/
 |------|---------|
 | `backend/alpaca.py` | Shared `httpx.AsyncClient` + `alpaca_get` / `alpaca_put` helpers. Env vars: `ALPACA_HOST`, `ALPACA_PORT`, `DEVICE_NUMBER`. |
 | `backend/routes.py` | All `/api/*` endpoints. Status route uses `asyncio.gather` for 13 concurrent Alpaca attribute fetches. |
-| `backend/catalog.py` | ~50 stars + ~30 Messier objects as plain Python lists. Constellation lines are index pairs into the `STARS` list. |
+| `backend/catalog.py` | Loads stars from `backend/data/stars.csv` (HYG v41, mag ≤ 6.5) and Messier from `backend/data/messier.csv`. Falls back to hardcoded 50-star list if CSVs are absent. Constellation lines defined as Hipparcos ID pairs; resolved to list indices at startup. |
+| `backend/fetch_catalog.py` | Run once to populate `backend/data/`: downloads HYG v41 from GitHub, filters to mag ≤ 6.5, writes `stars.csv`; also writes `messier.csv`. Command: `uv run python backend/fetch_catalog.py` |
 | `frontend/src/lib/projection.js` | Stereographic projection (`raDecToXY` / `xyToRADec`). RA in hours, Dec in degrees. |
 | `frontend/src/lib/format.js` | `formatRA`, `formatDec`, `parseRA`, `parseDec` — parse both decimal and sexagesimal. |
 | `frontend/src/lib/horizon.js` | `getHorizonPoints(lat, lst, steps=120)` — exact alt-az→equatorial transform for alt=0°. `drawHorizon` renders the dashed red horizon on the canvas. |

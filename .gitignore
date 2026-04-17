@@ -9,3 +9,6 @@
 
 # Project Builds
 */dist/
+
+# Generated star catalog (run backend/fetch_catalog.py to create)
+backend/data/stars.csv
