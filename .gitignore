@@ -1,0 +1,17 @@
+# AI Agent
+alpaca-control-panel/.deepagents
+
+# Python virtual environment
+alpaca-control-panel/.venv
+
+# Configuration
+alpaca-control-panel/.env
+
+# IDE
+alpaca-control-panel/.idea
+
+# Project Builds
+alpaca-control-panel/*/dist/
+
+# Generated star catalog (run backend/fetch_catalog.py to create)
+alpaca-control-panel/backend/data/stars.csv
