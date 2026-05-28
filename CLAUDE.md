@@ -14,6 +14,14 @@ Single-process in production: FastAPI serves the API **and** `frontend/dist/` st
 - Node.js ≥ 18
 - An ASCOM Alpaca device or simulator running on port 32323
 
+## ASCOM Alpaca simulator
+
+Simulator can be launched from `ascom.alpaca.simulators.macos-arm64/`
+
+```bash
+./ascom.alpaca.simulators
+```
+
 ## Commands
 
 All commands are run from `alpaca-control-panel/`.

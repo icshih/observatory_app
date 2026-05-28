@@ -4,14 +4,24 @@ alpaca-control-panel/.deepagents
 # Python virtual environment
 alpaca-control-panel/.venv
 
+# Node packages
+alpaca-control-panel/frontend/node_modules/
+
 # Configuration
-alpaca-control-panel/.env
+alpaca-control-panel/*/.env
 
 # IDE
 alpaca-control-panel/.idea
+
+# MacOS
+.DS_Store
+*/.DS_Store
 
 # Project Builds
 alpaca-control-panel/*/dist/
 
 # Generated star catalog (run backend/fetch_catalog.py to create)
 alpaca-control-panel/backend/data/stars.csv
+
+# ASCOM Alpaca Simulator
+ascom.alpaca.simulators.macos-arm64/
