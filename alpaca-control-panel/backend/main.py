@@ -4,8 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from .alpaca import create_client, close_client
-from .routes import router
+from alpaca import create_client, close_client
+from routes import router
 
 DIST = Path(__file__).parent.parent / "frontend" / "dist"
 

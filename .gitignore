@@ -2,7 +2,7 @@
 alpaca-control-panel/.deepagents
 
 # Python virtual environment
-alpaca-control-panel/.venv
+alpaca-control-panel/backend/.venv
 
 # Node packages
 alpaca-control-panel/frontend/node_modules/
@@ -11,7 +11,8 @@ alpaca-control-panel/frontend/node_modules/
 alpaca-control-panel/*/.env
 
 # IDE
-alpaca-control-panel/.idea
+**/.idea
+alpaca-control-panel/backend/__pycache__
 
 # MacOS
 .DS_Store

@@ -1,8 +1,8 @@
 import asyncio
 from fastapi import APIRouter
-from .alpaca import alpaca_get, alpaca_get_safe, alpaca_put
-from .models import MountStatus, SlewRequest, TrackingRequest, CatalogEntry
-from .catalog import STARS, MESSIER, CONSTELLATION_LINES
+from alpaca import alpaca_get, alpaca_get_safe, alpaca_put
+from models import MountStatus, SlewRequest, TrackingRequest, CatalogEntry
+from catalog import STARS, MESSIER, CONSTELLATION_LINES
 
 router = APIRouter(prefix="/api")
 
