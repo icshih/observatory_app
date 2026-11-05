@@ -2,10 +2,8 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import { raDecToXY, xyToRADec } from "../lib/projection.js";
 import { formatRA, formatDec } from "../lib/format.js";
 import { getHorizonPoints, drawHorizon } from "../lib/horizon.js";
+import { DEFAULT_LATITUDE } from "../lib/safety.js";
 
-const OBSERVER_LAT = import.meta.env.VITE_OBSERVER_LATITUDE
-  ? parseFloat(import.meta.env.VITE_OBSERVER_LATITUDE)
-  : 48.8;
 const MIN_SCALE = 80;
 const MAX_SCALE = 2000;
 const DEFAULT_SCALE = 280;
@@ -29,7 +27,11 @@ function magToRadius(mag) {
   return Math.max(1, 5 - (mag + 1.5) * (4 / 7.5));
 }
 
-export default function CelestialChart({ status, stars, messier, constellationLines, onClickCoords }) {
+// `latitude`: observer latitude in degrees — the mount's site latitude when
+// available (see effectiveLatitude), used for the chart centre and horizon.
+export default function CelestialChart({
+  status, latitude = DEFAULT_LATITUDE, stars, messier, constellationLines, onClickCoords,
+}) {
   const canvasRef = useRef(null);
   const stateRef = useRef({
     scale: DEFAULT_SCALE,
@@ -41,7 +43,7 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     startX: 0,
     startY: 0,
     centerRA: 0,
-    centerDec: OBSERVER_LAT,
+    centerDec: latitude,
   });
 
   const [tooltip, setTooltip] = useState(null);
@@ -53,6 +55,12 @@ export default function CelestialChart({ status, stars, messier, constellationLi
       stateRef.current.centerRA = status.sidereal_time;
     }
   }, [status?.sidereal_time]);
+
+  // Centre on the zenith Dec (= latitude); follows the mount's site latitude
+  // once /api/mount/info arrives.
+  useEffect(() => {
+    stateRef.current.centerDec = latitude;
+  }, [latitude]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -114,7 +122,7 @@ export default function CelestialChart({ status, stars, messier, constellationLi
 
     // ── Horizon indicator (altitude 0°) ──
     if (status?.connected) {
-      const horizonPoints = getHorizonPoints(OBSERVER_LAT, centerRA);
+      const horizonPoints = getHorizonPoints(latitude, centerRA);
       drawHorizon(ctx, horizonPoints, toCanvas);
     }
 
@@ -240,7 +248,7 @@ export default function CelestialChart({ status, stars, messier, constellationLi
       ctx.stroke();
       ctx.restore();
     }
-  }, [stars, messier, constellationLines, status]);
+  }, [stars, messier, constellationLines, status, latitude]);
 
   // Latest draw function, so long-lived listeners don't need re-registering
   // every time status changes (once per poll).

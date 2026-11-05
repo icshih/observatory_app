@@ -6,12 +6,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from alpaca import create_client, close_client
 from routes import router
+from safety import min_slew_altitude
 
 DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Validate MIN_SLEW_ALTITUDE at startup so a typo fails loudly instead of
+    # on the first slew.
+    min_slew_altitude()
     create_client()
     yield
     await close_client()

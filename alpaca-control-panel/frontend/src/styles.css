@@ -116,6 +116,8 @@ html, body, #root {
 .badge.connected .badge-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .badge.disconnected { background: #1a0a0a; color: var(--red); }
 .badge.disconnected .badge-dot { background: var(--red); }
+.badge.unreachable  { background: #1a1200; color: var(--amber); }
+.badge.unreachable .badge-dot { background: var(--amber); }
 .badge.tracking-on  { background: #0c2a1f; color: var(--cyan); }
 .badge.tracking-off { background: #1a1a0a; color: var(--amber-dim); }
 .badge.slewing      { background: #1a1200; color: var(--amber); animation: pulse 1s ease-in-out infinite; }
