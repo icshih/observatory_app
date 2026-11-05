@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { parseRA, parseDec, formatRA, formatDec } from "../lib/format.js";
+import { apiPost } from "../lib/api.js";
 import ObjectPicker from "./ObjectPicker.jsx";
 
 export default function CommandPanel({ status, stars, messier, onAction }) {
@@ -8,6 +9,16 @@ export default function CommandPanel({ status, stars, messier, onAction }) {
   const [slewError, setSlewError] = useState("");
 
   const connected = status?.connected ?? false;
+
+  // Run a command; report success (null) or the backend error message.
+  async function run(path, body) {
+    try {
+      await apiPost(path, body);
+      onAction?.(null);
+    } catch (err) {
+      onAction?.(err.message);
+    }
+  }
 
   async function handleSlew() {
     const ra = parseRA(raInput);
@@ -21,37 +32,13 @@ export default function CommandPanel({ status, stars, messier, onAction }) {
       return;
     }
     setSlewError("");
-    await fetch("/api/slew", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ right_ascension: ra, declination: dec }),
-    });
-    onAction?.();
+    await run("/api/slew", { right_ascension: ra, declination: dec });
   }
 
-  async function handleAbort() {
-    await fetch("/api/abort", { method: "POST" });
-    onAction?.();
-  }
-
-  async function handleTracking(e) {
-    await fetch("/api/tracking", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: e.target.checked }),
-    });
-    onAction?.();
-  }
-
-  async function handlePark() {
-    await fetch("/api/park", { method: "POST" });
-    onAction?.();
-  }
-
-  async function handleUnpark() {
-    await fetch("/api/unpark", { method: "POST" });
-    onAction?.();
-  }
+  const handleAbort = () => run("/api/abort");
+  const handleTracking = (e) => run("/api/tracking", { enabled: e.target.checked });
+  const handlePark = () => run("/api/park");
+  const handleUnpark = () => run("/api/unpark");
 
   function fillFromObject(obj) {
     setRaInput(formatRA(obj.ra));
@@ -61,12 +48,7 @@ export default function CommandPanel({ status, stars, messier, onAction }) {
 
   async function slewToObject(obj) {
     fillFromObject(obj);
-    await fetch("/api/slew", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ right_ascension: obj.ra, declination: obj.dec }),
-    });
-    onAction?.();
+    await run("/api/slew", { right_ascension: obj.ra, declination: obj.dec });
   }
 
   return (

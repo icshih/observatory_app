@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MountStatus(BaseModel):
@@ -19,8 +19,8 @@ class MountStatus(BaseModel):
 
 
 class SlewRequest(BaseModel):
-    right_ascension: float  # hours
-    declination: float      # degrees
+    right_ascension: float = Field(ge=0, lt=24)   # hours
+    declination: float = Field(ge=-90, le=90)     # degrees
 
 
 class TrackingRequest(BaseModel):

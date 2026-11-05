@@ -1,5 +1,6 @@
 # fmt: off
 import csv
+import re
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -24,7 +25,7 @@ _HIP_LINES = [
     (59774, 62956),  # Megrez – Alioth
     (62956, 65378),  # Alioth – Mizar
     (65378, 67301),  # Mizar – Alkaid
-    (54061, 58001),  # Dubhe – Phecda (bowl top)
+    (59774, 54061),  # Megrez – Dubhe (closes the bowl)
     # Canis Major
     (32349, 30324),  # Sirius – Mirzam
     (32349, 34444),  # Sirius – Wezen
@@ -36,18 +37,54 @@ _HIP_LINES = [
     (80763, 86228),  # Antares – Sargas
     # Crux (Southern Cross)
     (60718, 61084),  # Acrux – Gacrux
-    (62434, 60260),  # Mimosa – Delta Cru
+    (62434, 59747),  # Mimosa – Delta Cru (Imai)
     # Centaurus
     (71683, 68702),  # Alpha Cen – Hadar
     # Leo
     (49669, 50583),  # Regulus – Algieba
-    (50583, 54879),  # Algieba – Zosma
-    (54879, 57632),  # Zosma – Denebola
+    (50583, 54872),  # Algieba – Zosma
+    (54872, 57632),  # Zosma – Denebola
     # Perseus
     (15863, 14576),  # Mirfak – Algol
     # Auriga
     (24608, 28360),  # Capella – Menkalinan
 ]
+
+
+_GREEK = {
+    "Alp": "α", "Bet": "β", "Gam": "γ", "Del": "δ", "Eps": "ε", "Zet": "ζ",
+    "Eta": "η", "The": "θ", "Iot": "ι", "Kap": "κ", "Lam": "λ", "Mu":  "μ",
+    "Nu":  "ν", "Xi":  "ξ", "Omi": "ο", "Pi":  "π", "Rho": "ρ", "Sig": "σ",
+    "Tau": "τ", "Ups": "υ", "Phi": "φ", "Chi": "χ", "Psi": "ψ", "Ome": "ω",
+}
+_SUPERSCRIPT = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+# HYG "bf" field: optional Flamsteed number, optional Bayer letter (+ index),
+# then the constellation abbreviation, e.g. "58Alp Ori", "Alp1Cru", "19    Ori".
+_BF_RE = re.compile(r"^(\d*)\s*([A-Z][a-z]{1,2})?\s*(\d)?\s*([A-Z][a-z]{2})$")
+
+
+def _format_bf(bf: str) -> str:
+    """'58Alp Ori' → 'α Ori', 'Alp1Cru' → 'α¹ Cru', '19    Ori' → '19 Ori'."""
+    m = _BF_RE.match(bf.strip())
+    if not m:
+        return " ".join(bf.split())
+    flam, bayer, idx, con = m.groups()
+    if bayer and bayer in _GREEK:
+        return f"{_GREEK[bayer]}{(idx or '').translate(_SUPERSCRIPT)} {con}"
+    if flam:
+        return f"{flam} {con}"
+    return " ".join(bf.split())
+
+
+def _star_name(row: dict) -> str | None:
+    proper = row.get("proper", "").strip()
+    if proper:
+        return proper
+    bf = row.get("bf", "").strip()
+    if bf:
+        return _format_bf(bf)
+    hip = row.get("hip", "").strip()
+    return f"HIP {hip}" if hip else None
 
 
 def _load_stars_csv():
@@ -58,7 +95,10 @@ def _load_stars_csv():
     stars, hip_idx = [], {}
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            name = row.get("proper", "").strip() or row.get("bf", "").strip()
+            # HYG row 0 is the Sun (RA 0 / Dec 0, mag −26.7) — not a fixed star.
+            if row.get("proper", "").strip() == "Sol":
+                continue
+            name = _star_name(row)
             if not name:
                 continue
             try:
