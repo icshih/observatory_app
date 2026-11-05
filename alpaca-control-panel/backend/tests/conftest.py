@@ -17,6 +17,7 @@ class FakeAlpaca:
     - ``errors``      attribute/action → (ErrorNumber, ErrorMessage) Alpaca error
     - ``http_errors`` attribute/action → (status_code, text body)
     - ``timeouts``    set of attributes/actions that raise a timeout
+    - ``refused``     set of attributes/actions that raise "connection refused"
     - ``bad_json``    set of attributes/actions that return a non-JSON body
     - ``puts``        list of (action, form-params) received
     - ``gets``        list of (attribute, query-params) received
@@ -38,10 +39,19 @@ class FakeAlpaca:
             "sideofpier": 1,
             "targetrightascension": 5.5,
             "targetdeclination": 10.0,
+            # Site & capabilities (GET /api/mount/info, slew altitude check)
+            "sitelatitude": 48.8,
+            "sitelongitude": 2.35,
+            "siteelevation": 35.0,
+            "canslewasync": True,
+            "canpark": True,
+            "canunpark": True,
+            "cansettracking": True,
         }
         self.errors: dict[str, tuple[int, str]] = {}
         self.http_errors: dict[str, tuple[int, str]] = {}
         self.timeouts: set[str] = set()
+        self.refused: set[str] = set()
         self.bad_json: set[str] = set()
         self.puts: list[tuple[str, dict[str, str]]] = []
         self.gets: list[tuple[str, dict[str, str]]] = []
@@ -58,6 +68,8 @@ class FakeAlpaca:
 
         if name in self.timeouts:
             raise httpx.ReadTimeout("timed out", request=request)
+        if name in self.refused:
+            raise httpx.ConnectError("[Errno 61] Connection refused", request=request)
         if name in self.http_errors:
             status, text = self.http_errors[name]
             return httpx.Response(status, text=text)
@@ -83,6 +95,12 @@ class FakeAlpaca:
         matches = [p for a, p in self.puts if a == action]
         assert matches, f"no PUT to {action!r}; got {[a for a, _ in self.puts]}"
         return matches[-1]
+
+
+@pytest.fixture(autouse=True)
+def _default_slew_limit(monkeypatch):
+    """Tests assume the default 10° limit regardless of the developer's env."""
+    monkeypatch.delenv("MIN_SLEW_ALTITUDE", raising=False)
 
 
 @pytest.fixture

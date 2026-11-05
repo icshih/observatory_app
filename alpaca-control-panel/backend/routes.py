@@ -1,15 +1,31 @@
 import asyncio
 from fastapi import APIRouter
-from alpaca import alpaca_get, alpaca_get_safe, alpaca_put
-from models import MountStatus, SlewRequest, TrackingRequest, CatalogEntry
+from alpaca import AlpacaError, AlpacaUnreachableError, alpaca_get, alpaca_get_safe, alpaca_put
+from models import MountInfo, MountStatus, SlewRequest, TrackingRequest, CatalogEntry
 from catalog import STARS, MESSIER, CONSTELLATION_LINES
+from safety import check_slew_target, min_slew_altitude
 
 router = APIRouter(prefix="/api")
 
 
+def _as_bool(value) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _as_float(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 @router.get("/status", response_model=MountStatus)
 async def get_status():
-    connected = await alpaca_get_safe("connected", False)
+    try:
+        connected = await alpaca_get("connected")
+    except AlpacaUnreachableError as exc:
+        return MountStatus(connected=False, reachable=False, error=exc.detail)
+    except AlpacaError as exc:
+        return MountStatus(connected=False, error=exc.detail)
     if not connected:
         return MountStatus(connected=False)
 
@@ -62,8 +78,38 @@ async def disconnect():
     return {"ok": True}
 
 
+@router.get("/mount/info", response_model=MountInfo)
+async def get_mount_info():
+    """Site location and capabilities. Clients fetch this once per connection
+    rather than on every status poll. Unavailable values come back as null."""
+    lat, lon, elev, can_slew_async, can_park, can_unpark, can_set_tracking = (
+        await asyncio.gather(
+            alpaca_get_safe("sitelatitude"),
+            alpaca_get_safe("sitelongitude"),
+            alpaca_get_safe("siteelevation"),
+            alpaca_get_safe("canslewasync"),
+            alpaca_get_safe("canpark"),
+            alpaca_get_safe("canunpark"),
+            alpaca_get_safe("cansettracking"),
+        )
+    )
+    return MountInfo(
+        site_latitude=_as_float(lat),
+        site_longitude=_as_float(lon),
+        site_elevation=_as_float(elev),
+        can_slew_async=_as_bool(can_slew_async),
+        can_park=_as_bool(can_park),
+        can_unpark=_as_bool(can_unpark),
+        can_set_tracking=_as_bool(can_set_tracking),
+        min_slew_altitude=min_slew_altitude(),
+    )
+
+
 @router.post("/slew")
 async def slew(req: SlewRequest):
+    # Refuses (409) targets below MIN_SLEW_ALTITUDE; fails closed (502) if
+    # the mount's LST/latitude can't be read.
+    await check_slew_target(req.right_ascension, req.declination)
     await alpaca_put(
         "slewtocoordinatesasync",
         RightAscension=req.right_ascension,

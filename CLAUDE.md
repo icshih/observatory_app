@@ -53,8 +53,8 @@ npm test           # vitest run (npm run test:watch for watch mode)
 
 CI (`.github/workflows/ci.yml`) runs both suites plus `npm run build` on every push to `main` and on PRs.
 
-- **Backend** (`backend/tests/`, pytest): no simulator needed — `conftest.py` provides a `FakeAlpaca` device served through `httpx.MockTransport` (patched in via `main.create_client`). Set `fake_alpaca.values / errors / http_errors / timeouts / bad_json` to script device behaviour; inspect `fake_alpaca.puts / gets`. SPA tests build a temp `dist/` and call `main.mount_frontend(app, dist)`. `stars.csv` is gitignored, so the real-data catalog test is skipped in CI.
-- **Frontend** (`src/lib/*.test.js`, vitest): pure-function tests for `format.js`, `projection.js`, `horizon.js` (horizon points are checked against an independent altitude formula).
+- **Backend** (`backend/tests/`, pytest): no simulator needed — `conftest.py` provides a `FakeAlpaca` device served through `httpx.MockTransport` (patched in via `main.create_client`). Set `fake_alpaca.values / errors / http_errors / timeouts / refused / bad_json` to script device behaviour; inspect `fake_alpaca.puts / gets`. SPA tests build a temp `dist/` and call `main.mount_frontend(app, dist)`. `stars.csv` is gitignored, so the real-data catalog test is skipped in CI. An autouse fixture clears `MIN_SLEW_ALTITUDE` so tests always see the 10° default; the fake mount sits at 48.8°N with LST 6.25h.
+- **Frontend** (`src/lib/*.test.js`, vitest): pure-function tests for `format.js`, `projection.js`, `horizon.js`, `safety.js`, `connection.js` (horizon points are checked against an independent altitude formula; `safety.js` boundaries match the backend's).
 
 ## Configuration
 
@@ -63,20 +63,24 @@ CI (`.github/workflows/ci.yml`) runs both suites plus `npm run build` on every p
 | `ALPACA_HOST`        | `localhost` | Alpaca device host                   |
 | `ALPACA_PORT`        | `32323`     | Alpaca device port                   |
 | `DEVICE_NUMBER`      | `0`         | Telescope device number              |
-| `VITE_OBSERVER_LATITUDE` | `48.8`  | Observer latitude (degrees, frontend)|
+| `MIN_SLEW_ALTITUDE`  | `10`        | Minimum target altitude (degrees) for `/api/slew`; `off` disables. Invalid values fail at startup. |
+| `VITE_OBSERVER_LATITUDE` | `48.8`  | **Fallback** observer latitude (frontend), used only if the mount doesn't report `SiteLatitude` |
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
 | `backend/main.py` | FastAPI app. SPA fallback serves files from `frontend/dist/` — paths are resolved and confined to `dist/` (path-traversal guard); unknown `/api/*` paths return 404. |
-| `backend/alpaca.py` | Shared `httpx.AsyncClient` + `alpaca_get` / `alpaca_put` helpers. Reads `ALPACA_HOST`, `ALPACA_PORT`, `DEVICE_NUMBER`. HTTP errors from the device are returned as 502 with the device's response body in `detail`. |
-| `backend/routes.py` | All `/api/*` endpoints. Status route uses `asyncio.gather` for 13 concurrent Alpaca attribute fetches. |
+| `backend/alpaca.py` | Shared `httpx.AsyncClient` + `alpaca_get` / `alpaca_put` helpers. Reads `ALPACA_HOST`, `ALPACA_PORT`, `DEVICE_NUMBER`. Raises `AlpacaUnreachableError` (timeout → 504, connection failure → 502) or `AlpacaError` (device answered with an error → 502). HTTP error bodies are included in `detail`; ASCOM error numbers are translated (`ASCOM_ERRORS`, e.g. 1032 → "not allowed while the mount is parked") because devices often send only the method name. |
+| `backend/routes.py` | All `/api/*` endpoints. Status route uses `asyncio.gather` for 13 concurrent Alpaca attribute fetches and reports `reachable`/`error`. |
+| `backend/safety.py` | `altitude()`, `min_slew_altitude()` (parses `MIN_SLEW_ALTITUDE`), `check_slew_target()` — server-side slew guard using the mount's own LST + site latitude. **Fails closed**: if they can't be read the slew is refused. |
 | `backend/catalog.py` | Loads stars from `backend/data/stars.csv` (HYG v4.1, mag ≤ 6.5, ~8.9k stars; the Sun is excluded). Names: proper name → Bayer/Flamsteed (e.g. `α¹ Cru`, `19 Ori`) → `HIP n`. Messier from `backend/data/messier.csv`. Falls back to hardcoded 50-star list if CSVs are absent. Constellation lines defined as Hipparcos ID pairs; resolved to list indices at startup. |
 | `backend/fetch_catalog.py` | One-shot script to populate `backend/data/`: downloads HYG v4.1 from GitHub, filters to mag ≤ 6.5 (excluding the Sun), writes `stars.csv`; also writes `messier.csv`. |
 | `frontend/src/lib/projection.js` | Stereographic projection (`raDecToXY` / `xyToRADec`). RA in hours, Dec in degrees. |
 | `frontend/src/lib/format.js` | `formatRA`, `formatDec`, `parseRA`, `parseDec` — parse both decimal and sexagesimal. Parsers are strict: invalid input returns `null` (never silently 0). Formatters round the total before splitting so `60s` can't appear. |
-| `frontend/src/lib/api.js` | `apiPost(path, body)` — throws an `Error` with the backend's `detail` on non-2xx. All command buttons use it; failures surface as a "Command failed" toast in `App.jsx`. |
+| `frontend/src/lib/api.js` | `apiPost(path, body)` — throws an `Error` with the backend's `detail` on non-2xx. Commands go through `runCommand(name, path, body)` in `App.jsx`, which allows one command at a time (others disabled, label shows e.g. "Slewing…") — **except abort, which is never blocked**. Failures surface as a "Command failed" toast. |
+| `frontend/src/lib/safety.js` | `altitudeOf`, `checkSlewTarget` (live altitude preview + blocks below-limit slews in the UI), `effectiveLatitude` (mount site latitude → env fallback), `supports(mountInfo, flag)` (unknown capability = allowed). |
+| `frontend/src/lib/connection.js` | `connectionState(status)` → `unknown` / `unreachable` / `disconnected` / `connected` for the status badge. |
 | `frontend/src/lib/horizon.js` | `getHorizonPoints(lat, lst, steps=120)` — exact alt-az→equatorial transform for alt=0°. `drawHorizon` renders the dashed red horizon on the canvas. |
 | `frontend/src/components/CelestialChart.jsx` | Canvas sky map. Chart auto-centres on LST until user drags; double-click resets. `stateRef` holds pan/zoom/centre state between renders. |
 
@@ -92,6 +96,7 @@ alpaca-control-panel/
 │   ├── routes.py        # /api/* endpoints
 │   ├── models.py        # Pydantic models (MountStatus, SlewRequest, …)
 │   ├── catalog.py       # Stars, Messier objects, constellation lines
+│   ├── safety.py        # Slew altitude guard (MIN_SLEW_ALTITUDE)
 │   ├── fetch_catalog.py # One-shot catalog downloader
 │   ├── data/            # stars.csv, messier.csv (generated)
 │   └── tests/           # pytest suite (conftest.py: FakeAlpaca)
@@ -102,6 +107,7 @@ alpaca-control-panel/
         ├── styles.css
         ├── hooks/
         │   ├── useMountStatus.js   # Polls /api/status every 1 s (skips a tick while a request is in flight; 8 s timeout)
+        │   ├── useMountInfo.js     # Fetches /api/mount/info on each connect
         │   └── useCatalog.js       # Fetches /api/catalog once
         ├── components/
         │   ├── StatusPanel.jsx     # Left sidebar: RA/Dec, Alt/Az, LST, …
@@ -112,6 +118,8 @@ alpaca-control-panel/
             ├── projection.js       # Stereographic projection
             ├── format.js           # RA/Dec formatting & parsing
             ├── api.js              # apiPost helper with error reporting
+            ├── safety.js           # Altitude check, site latitude, capabilities
+            ├── connection.js       # Connection state classification
             ├── horizon.js          # Horizon transform & drawing
             └── *.test.js           # vitest unit tests
 ```
@@ -120,9 +128,10 @@ alpaca-control-panel/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/status` | Returns `MountStatus` (13 attrs via `asyncio.gather`) |
+| `GET` | `/api/status` | Returns `MountStatus` (13 attrs via `asyncio.gather`) plus `reachable` (false = device can't be reached at all) and `error` |
+| `GET` | `/api/mount/info` | Returns `MountInfo`: site lat/lon/elevation, `can_slew_async` / `can_park` / `can_unpark` / `can_set_tracking` (null = unknown), `min_slew_altitude`. Fetched once per connection, not polled. |
 | `POST` | `/api/connect` / `/api/disconnect` | Toggle connection |
-| `POST` | `/api/slew` | Accepts `SlewRequest` (RA hours `0 ≤ ra < 24`, Dec degrees `−90 ≤ dec ≤ 90`; 422 otherwise) |
+| `POST` | `/api/slew` | Accepts `SlewRequest` (RA hours `0 ≤ ra < 24`, Dec degrees `−90 ≤ dec ≤ 90`; 422 otherwise). **409** if the target is below `MIN_SLEW_ALTITUDE`; **502** if altitude can't be verified. |
 | `POST` | `/api/abort` | Abort current slew |
 | `POST` | `/api/tracking` | Accepts `TrackingRequest` (enabled bool) |
 | `POST` | `/api/park` / `/api/unpark` | Park commands |
@@ -141,7 +150,9 @@ unless the project is restructured into an installable package.
 - Long-lived canvas listeners (`ResizeObserver`, wheel) call `drawRef.current()` so they aren't re-registered on every status poll. Wheel zoom is a native `{ passive: false }` listener because React's `onWheel` is passive and can't `preventDefault()`.
 - Pan/click use pointer events with pointer capture; a click is a pointerup within 4 px of the pointerdown position.
 - `draggedRef` tracks whether the user has manually panned the chart; when `false` the chart auto-follows LST updates from the status poll.
-- Observer latitude defaults to 48.8° (Paris) but is overridable via `VITE_OBSERVER_LATITUDE` env var in `frontend/.env`.
+- Observer latitude comes from the mount (`SiteLatitude` via `/api/mount/info`). Only if the mount doesn't report it does the chart fall back to `VITE_OBSERVER_LATITUDE` (default 48.8°); the Site panel marks this as "(default)".
+- Slew altitude limit is enforced twice: the UI previews altitude and disables Slew below the limit (`checkSlewTarget`), and the backend refuses with 409 regardless of client. Both use `sin(alt) = sinφ·sinδ + cosφ·cosδ·cos(LST − RA)`.
+- Capabilities: buttons are disabled only when the mount explicitly reports `false`; unknown (`null`) is treated as supported so the mount can decide.
 - Horizon is drawn using an exact spherical-astronomy transform in `horizon.js`: `Dec = arcsin(cos(φ)·cos(A))`, `H = atan2(−sin(A), −sin(φ)·cos(A))`, `RA = LST − H`.
 - `CONSTELLATION_LABELS` in `CelestialChart.jsx` is a static array of `{name, ra, dec}` for the 10 constellations present in the catalog; labels render at `scale > 150`.
 
