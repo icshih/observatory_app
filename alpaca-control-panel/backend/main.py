@@ -28,17 +28,24 @@ app.add_middleware(
 
 app.include_router(router)
 
-if DIST.exists():
-    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+def mount_frontend(app: FastAPI, dist: Path) -> None:
+    """Serve the built SPA from `dist`. Must be registered after API routes."""
+    dist_root = dist.resolve()
+    if (dist_root / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=dist_root / "assets"), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
         # Unknown API routes must 404 rather than fall through to the SPA.
         if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not Found")
-        # Resolve and confine to DIST to prevent path traversal (e.g. ..%2F).
-        dist_root = DIST.resolve()
+        # Resolve and confine to dist to prevent path traversal (e.g. ..%2F).
         file = (dist_root / full_path).resolve()
         if file.is_relative_to(dist_root) and file.is_file():
             return FileResponse(file)
         return FileResponse(dist_root / "index.html")
+
+
+if DIST.exists():
+    mount_frontend(app, DIST)
