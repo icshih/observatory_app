@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -33,7 +33,12 @@ if DIST.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
-        file = DIST / full_path
-        if file.is_file():
+        # Unknown API routes must 404 rather than fall through to the SPA.
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        # Resolve and confine to DIST to prevent path traversal (e.g. ..%2F).
+        dist_root = DIST.resolve()
+        file = (dist_root / full_path).resolve()
+        if file.is_relative_to(dist_root) and file.is_file():
             return FileResponse(file)
-        return FileResponse(DIST / "index.html")
+        return FileResponse(dist_root / "index.html")

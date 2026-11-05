@@ -12,7 +12,7 @@ alpaca-control-panel/*/.env
 
 # IDE
 **/.idea
-alpaca-control-panel/backend/__pycache__
+**/__pycache__/
 
 # MacOS
 .DS_Store

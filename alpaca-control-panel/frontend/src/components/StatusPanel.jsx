@@ -1,19 +1,22 @@
 import { formatRA, formatDec, formatDeg, formatHMS } from "../lib/format.js";
+import { apiPost } from "../lib/api.js";
 
 const PIER = ["East", "West"];
 
-export default function StatusPanel({ status, onConnect, onDisconnect }) {
+export default function StatusPanel({ status, onAction }) {
   const connected = status?.connected ?? false;
 
-  async function handleConnect() {
-    await fetch("/api/connect", { method: "POST" });
-    onConnect?.();
+  async function run(path) {
+    try {
+      await apiPost(path);
+      onAction?.(null);
+    } catch (err) {
+      onAction?.(err.message);
+    }
   }
 
-  async function handleDisconnect() {
-    await fetch("/api/disconnect", { method: "POST" });
-    onDisconnect?.();
-  }
+  const handleConnect = () => run("/api/connect");
+  const handleDisconnect = () => run("/api/disconnect");
 
   return (
     <div className="panel">

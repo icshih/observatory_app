@@ -42,6 +42,29 @@ def _common_params() -> dict:
     return {"ClientID": 1, "ClientTransactionID": _next_txid()}
 
 
+def _http_error(exc: httpx.HTTPError, what: str) -> HTTPException:
+    """Map an httpx error to an HTTPException with a useful message.
+
+    Alpaca devices return HTTP 400/500 with a plain-text explanation for
+    invalid values or driver failures, so include the body when present.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        body = exc.response.text.strip()
+        msg = f"{what}: HTTP {exc.response.status_code}" + (f" \u2013 {body}" if body else "")
+        return HTTPException(status_code=502, detail=msg)
+    return HTTPException(status_code=502, detail=f"{what}: {exc}")
+
+
+def _parse_json(r: httpx.Response, what: str) -> dict:
+    try:
+        data = r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail=f"{what}: invalid JSON from Alpaca device")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail=f"{what}: unexpected Alpaca response")
+    return data
+
+
 def _check_error(data: dict) -> None:
     code = data.get("ErrorNumber", 0)
     if code != 0:
@@ -57,23 +80,23 @@ async def alpaca_get(attribute: str) -> object:
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail=f"Timeout fetching {attribute}")
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    data = r.json()
+        raise _http_error(exc, attribute)
+    data = _parse_json(r, attribute)
     _check_error(data)
-    return data["Value"]
+    return data.get("Value")
 
 
 async def alpaca_put(action: str, **params) -> None:
     url = f"{_BASE}/{action}"
-    body = {**_common_params(), **{k: v for k, v in params.items()}}
+    body = {**_common_params(), **params}
     try:
         r = await get_client().put(url, data=body)
         r.raise_for_status()
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail=f"Timeout calling {action}")
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    _check_error(r.json())
+        raise _http_error(exc, action)
+    _check_error(_parse_json(r, action))
 
 
 async def alpaca_get_safe(attribute: str, default=None):

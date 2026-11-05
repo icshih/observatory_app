@@ -38,6 +38,8 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     dragging: false,
     lastX: 0,
     lastY: 0,
+    startX: 0,
+    startY: 0,
     centerRA: 0,
     centerDec: OBSERVER_LAT,
   });
@@ -52,17 +54,14 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     }
   }, [status?.sidereal_time]);
 
-  // Log latitude for debugging
-  useEffect(() => {
-    console.debug("Observer latitude set to", OBSERVER_LAT, "degrees");
-  }, [OBSERVER_LAT]);
-
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    const W = canvas.width;
-    const H = canvas.height;
+    // Work in CSS pixels: the device-pixel-ratio transform is applied in the
+    // ResizeObserver callback, so canvas.width/height (device px) must not be used here.
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
     const { scale, offsetX, offsetY, centerRA, centerDec } = stateRef.current;
 
     const cx = W / 2 + offsetX;
@@ -113,6 +112,12 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     ctx.setLineDash([]);
     ctx.restore();
 
+    // ── Horizon indicator (altitude 0°) ──
+    if (status?.connected) {
+      const horizonPoints = getHorizonPoints(OBSERVER_LAT, centerRA);
+      drawHorizon(ctx, horizonPoints, toCanvas);
+    }
+
     // ── Constellation lines ──
     ctx.save();
     ctx.strokeStyle = "rgba(31,65,100,0.5)";
@@ -152,13 +157,20 @@ export default function CelestialChart({ status, stars, messier, constellationLi
       const [px, py] = toCanvas(star.ra, star.dec);
       if (!isVisible(px, py)) continue;
       const r = magToRadius(star.magnitude);
-      // warm white gradient
-      const grad = ctx.createRadialGradient(px, py, 0, px, py, r * 2);
-      grad.addColorStop(0, "rgba(255,248,230,1)");
-      grad.addColorStop(1, "rgba(255,248,230,0)");
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
+      if (r > 1.5) {
+        // warm white glow for brighter stars only — gradients are costly
+        // and the catalog has ~9k stars.
+        const grad = ctx.createRadialGradient(px, py, 0, px, py, r * 2);
+        grad.addColorStop(0, "rgba(255,248,230,1)");
+        grad.addColorStop(1, "rgba(255,248,230,0)");
+        ctx.fillStyle = grad;
+      } else {
+        // faint stars: dimmer as magnitude increases
+        const alpha = Math.max(0.35, Math.min(0.9, 1.1 - star.magnitude / 8));
+        ctx.fillStyle = `rgba(255,248,230,${alpha.toFixed(2)})`;
+      }
       ctx.fill();
       if (showStarLabels && star.magnitude < 2) {
         ctx.fillStyle = "rgba(209,213,219,0.6)";
@@ -228,28 +240,44 @@ export default function CelestialChart({ status, stars, messier, constellationLi
       ctx.stroke();
       ctx.restore();
     }
-
-    // ── Horizon indicator (altitude 0°) ──
-    if (status?.connected) {
-      const horizonPoints = getHorizonPoints(OBSERVER_LAT, stateRef.current.centerRA);
-      drawHorizon(ctx, horizonPoints, toCanvas);
-    }
   }, [stars, messier, constellationLines, status]);
 
-  // Resize observer + redraw
+  // Latest draw function, so long-lived listeners don't need re-registering
+  // every time status changes (once per poll).
+  const drawRef = useRef(draw);
+  drawRef.current = draw;
+
+  // Resize observer — the only place the pixel-ratio transform is applied.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ro = new ResizeObserver(() => {
-      canvas.width = canvas.offsetWidth * window.devicePixelRatio;
-      canvas.height = canvas.offsetHeight * window.devicePixelRatio;
-      const ctx = canvas.getContext("2d");
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-      draw();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(canvas.clientWidth * dpr);
+      canvas.height = Math.round(canvas.clientHeight * dpr);
+      // Setting width/height resets the transform, so scale exactly once here.
+      canvas.getContext("2d").scale(dpr, dpr);
+      drawRef.current();
     });
     ro.observe(canvas.parentElement);
     return () => ro.disconnect();
-  }, [draw]);
+  }, []);
+
+  // Wheel zoom — must be a non-passive native listener for preventDefault()
+  // to work (React registers onWheel as passive).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    function onWheel(e) {
+      e.preventDefault();
+      const s = stateRef.current;
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      s.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s.scale * factor));
+      drawRef.current();
+    }
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, []);
 
   // Redraw whenever dependencies change
   useEffect(() => {
@@ -262,13 +290,18 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     return [e.clientX - rect.left, e.clientY - rect.top];
   }
 
-  function onMouseDown(e) {
-    stateRef.current.dragging = true;
-    stateRef.current.lastX = e.clientX;
-    stateRef.current.lastY = e.clientY;
+  function onPointerDown(e) {
+    if (e.button !== 0) return;
+    const s = stateRef.current;
+    s.dragging = true;
+    s.lastX = s.startX = e.clientX;
+    s.lastY = s.startY = e.clientY;
+    // Keep receiving move/up events even if the pointer leaves the canvas.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setTooltip(null);
   }
 
-  function onMouseMove(e) {
+  function onPointerMove(e) {
     const s = stateRef.current;
     if (!s.dragging) return;
     const dx = e.clientX - s.lastX;
@@ -281,35 +314,32 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     draw();
   }
 
-  function onMouseUp(e) {
+  function onPointerUp(e) {
     const s = stateRef.current;
     const wasDragging = s.dragging;
     s.dragging = false;
-    // If mouse barely moved, treat as click
-    const dx = Math.abs(e.clientX - s.lastX);
-    const dy = Math.abs(e.clientY - s.lastY);
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    // Treat as a click only if the pointer barely moved since pointerdown.
+    const dx = Math.abs(e.clientX - s.startX);
+    const dy = Math.abs(e.clientY - s.startY);
     if (wasDragging && dx < 4 && dy < 4) {
       handleClick(e);
     }
+  }
+
+  function onPointerCancel() {
+    stateRef.current.dragging = false;
   }
 
   function handleClick(e) {
     const canvas = canvasRef.current;
     const s = stateRef.current;
     const [mouseX, mouseY] = getCanvasCoords(e);
-    const cx = canvas.offsetWidth / 2 + s.offsetX;
-    const cy = canvas.offsetHeight / 2 + s.offsetY;
+    const cx = canvas.clientWidth / 2 + s.offsetX;
+    const cy = canvas.clientHeight / 2 + s.offsetY;
     const { ra, dec } = xyToRADec(mouseX - cx, mouseY - cy, s.centerRA, s.centerDec, s.scale);
     setTooltip({ x: mouseX, y: mouseY, ra, dec });
     onClickCoords?.({ ra, dec });
-  }
-
-  function onWheel(e) {
-    e.preventDefault();
-    const s = stateRef.current;
-    const factor = e.deltaY < 0 ? 1.12 : 0.89;
-    s.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s.scale * factor));
-    draw();
   }
 
   function onDoubleClick() {
@@ -317,6 +347,7 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     stateRef.current.offsetX = 0;
     stateRef.current.offsetY = 0;
     draggedRef.current = false;
+    setTooltip(null);
     draw();
   }
 
@@ -324,13 +355,12 @@ export default function CelestialChart({ status, stars, messier, constellationLi
     <div className="chart-wrapper">
       <canvas
         ref={canvasRef}
-        style={{ cursor: "crosshair", width: "100%", height: "100%" }}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onWheel={onWheel}
+        style={{ cursor: "crosshair", width: "100%", height: "100%", touchAction: "none" }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onDoubleClick={onDoubleClick}
-        onClick={() => setTooltip(null)}
       />
       {tooltip && (
         <div

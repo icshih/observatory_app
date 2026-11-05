@@ -1,9 +1,9 @@
 """
-Downloads the HYG v3 star catalog and generates backend/data/stars.csv
+Downloads the HYG v4.1 star catalog and generates backend/data/stars.csv
 (stars mag ≤ 6.5) and backend/data/messier.csv.
 
-Run once from the project root:
-    uv run python backend/fetch_catalog.py
+Run once from alpaca-control-panel/backend/:
+    uv run python fetch_catalog.py
 """
 import csv
 import io
@@ -65,12 +65,15 @@ _MESSIER = [
 
 
 def fetch_stars():
-    print(f"Downloading HYG v3 from:\n  {HYG_URL}")
+    print(f"Downloading HYG v4.1 from:\n  {HYG_URL}")
     with urllib.request.urlopen(HYG_URL, timeout=30) as resp:
         raw = resp.read().decode("utf-8")
 
     rows = []
     for row in csv.DictReader(io.StringIO(raw)):
+        # Row 0 of HYG is the Sun — not a fixed star; exclude it.
+        if row.get("proper", "").strip() == "Sol":
+            continue
         try:
             if float(row["mag"]) > MAG_LIMIT:
                 continue
