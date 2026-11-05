@@ -68,7 +68,8 @@ def _parse_json(r: httpx.Response, what: str) -> dict:
 def _check_error(data: dict) -> None:
     code = data.get("ErrorNumber", 0)
     if code != 0:
-        msg = data.get("ErrorMessage", f"Alpaca error {code}")
+        # Devices may send ErrorMessage: "" — fall back to the code then.
+        msg = data.get("ErrorMessage") or f"Alpaca error {code}"
         raise HTTPException(status_code=502, detail=msg)
 
 

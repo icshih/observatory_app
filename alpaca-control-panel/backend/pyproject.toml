@@ -7,3 +7,19 @@ dependencies = [
     "httpx==0.28.1",
     "uvicorn>=0.48.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+# Backend modules use flat imports (`from alpaca import …`), so put this
+# directory on sys.path for tests.
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+    # Third-party deprecation noise we can't act on here.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    "ignore:_pytest.python.CallSpec2 has been renamed",
+]

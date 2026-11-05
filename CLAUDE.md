@@ -33,6 +33,7 @@ The backend is a self-contained uv project in `alpaca-control-panel/backend/`
 uv sync                                          # install Python deps
 uv run uvicorn main:app --reload --port 8000     # run backend (dev, with reload)
 uv run python fetch_catalog.py                   # populate star/Messier CSVs (run once)
+uv run pytest                                    # run backend tests
 
 # ── Frontend (from alpaca-control-panel/frontend/) ──
 npm install
@@ -43,7 +44,17 @@ npm run dev        # http://localhost:5173
 # Build frontend for production
 npm run build      # outputs frontend/dist/
 # Backend then serves the built UI at http://localhost:8000
+
+# Run frontend tests
+npm test           # vitest run (npm run test:watch for watch mode)
 ```
+
+## Tests
+
+CI (`.github/workflows/ci.yml`) runs both suites plus `npm run build` on every push to `main` and on PRs.
+
+- **Backend** (`backend/tests/`, pytest): no simulator needed — `conftest.py` provides a `FakeAlpaca` device served through `httpx.MockTransport` (patched in via `main.create_client`). Set `fake_alpaca.values / errors / http_errors / timeouts / bad_json` to script device behaviour; inspect `fake_alpaca.puts / gets`. SPA tests build a temp `dist/` and call `main.mount_frontend(app, dist)`. `stars.csv` is gitignored, so the real-data catalog test is skipped in CI.
+- **Frontend** (`src/lib/*.test.js`, vitest): pure-function tests for `format.js`, `projection.js`, `horizon.js` (horizon points are checked against an independent altitude formula).
 
 ## Configuration
 
@@ -82,7 +93,8 @@ alpaca-control-panel/
 │   ├── models.py        # Pydantic models (MountStatus, SlewRequest, …)
 │   ├── catalog.py       # Stars, Messier objects, constellation lines
 │   ├── fetch_catalog.py # One-shot catalog downloader
-│   └── data/            # stars.csv, messier.csv (generated)
+│   ├── data/            # stars.csv, messier.csv (generated)
+│   └── tests/           # pytest suite (conftest.py: FakeAlpaca)
 └── frontend/
     ├── vite.config.js   # Proxy /api → :8000
     └── src/
@@ -100,7 +112,8 @@ alpaca-control-panel/
             ├── projection.js       # Stereographic projection
             ├── format.js           # RA/Dec formatting & parsing
             ├── api.js              # apiPost helper with error reporting
-            └── horizon.js          # Horizon transform & drawing
+            ├── horizon.js          # Horizon transform & drawing
+            └── *.test.js           # vitest unit tests
 ```
 
 ## API endpoints
